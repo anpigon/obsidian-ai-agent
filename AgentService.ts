@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { AIChatSettings, SDKMessage, ChatMessage } from './types';
+import { MessageFactory } from './MessageFactory';
 
 export interface AgentSession {
 	sessionId: string | null;
@@ -16,6 +17,15 @@ export interface AgentExecutionOptions {
 	signal?: AbortSignal;
 }
 
+/**
+ * AgentService - Claude Agent SDK와의 통신을 담당하는 서비스
+ *
+ * 책임:
+ * - Claude Agent SDK query 함수 래핑
+ * - 스트리밍 메시지 처리
+ * - 세션 관리
+ * - 취소 처리
+ */
 export class AgentService {
 	private settings: AIChatSettings;
 	private currentAbortController: AbortController | null = null;
@@ -33,7 +43,7 @@ export class AgentService {
 
 		this.currentAbortController = new AbortController();
 
-		// Combine external signal with internal abort controller
+		// 외부 시그널과 내부 abort controller 연결
 		if (signal) {
 			signal.addEventListener('abort', () => {
 				this.currentAbortController?.abort();
@@ -43,21 +53,9 @@ export class AgentService {
 		let activeSessionId: string | null = sessionId || null;
 
 		try {
-			// Set API key from settings if provided
-			if (this.settings.apiKey) {
-				process.env.ANTHROPIC_API_KEY = this.settings.apiKey;
-			}
+			this.configureApiKey();
 
-			const queryOptions: Record<string, unknown> = {
-				model: this.settings.model || 'claude-sonnet-4-20250514',
-				cwd: workingDirectory,
-				permissionMode: 'bypassPermissions' as const,
-			};
-
-			// Resume session if provided
-			if (sessionId) {
-				queryOptions.resume = sessionId;
-			}
+			const queryOptions = this.buildQueryOptions(workingDirectory, sessionId);
 
 			const stream = query({
 				prompt,
@@ -65,14 +63,13 @@ export class AgentService {
 			});
 
 			for await (const message of stream) {
-				// Check if aborted
 				if (this.currentAbortController?.signal.aborted) {
 					break;
 				}
 
-				const chatMessage = this.convertSDKMessage(message as SDKMessage, activeSessionId);
+				const chatMessage = MessageFactory.convertSDKMessage(message as SDKMessage, activeSessionId);
 
-				// Extract session ID from init message
+				// init 메시지에서 세션 ID 추출
 				if (message.type === 'system' && (message as SDKMessage).subtype === 'init') {
 					activeSessionId = (message as SDKMessage).session_id || activeSessionId;
 				}
@@ -86,18 +83,7 @@ export class AgentService {
 			return activeSessionId;
 
 		} catch (error) {
-			if (error instanceof Error && error.name === 'AbortError') {
-				// Cancelled by user
-				onMessage({
-					type: 'system',
-					result: 'Execution cancelled by user',
-					session_id: activeSessionId || `session-${Date.now()}`,
-					uuid: `cancel-${Date.now()}`,
-					timestamp: new Date()
-				});
-			} else {
-				onError(error instanceof Error ? error : new Error(String(error)));
-			}
+			this.handleError(error, activeSessionId, onMessage, onError);
 			onComplete();
 			return activeSessionId;
 		} finally {
@@ -111,71 +97,37 @@ export class AgentService {
 		}
 	}
 
-	private convertSDKMessage(sdkMessage: SDKMessage, sessionId: string | null): ChatMessage | null {
-		const baseMessage = {
-			session_id: sdkMessage.session_id || sessionId || `session-${Date.now()}`,
-			uuid: `${sdkMessage.type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-			timestamp: new Date()
+	private configureApiKey(): void {
+		if (this.settings.apiKey) {
+			process.env.ANTHROPIC_API_KEY = this.settings.apiKey;
+		}
+	}
+
+	private buildQueryOptions(workingDirectory: string, sessionId?: string | null): Record<string, unknown> {
+		const options: Record<string, unknown> = {
+			model: this.settings.model || 'claude-sonnet-4-20250514',
+			cwd: workingDirectory,
+			permissionMode: 'bypassPermissions' as const,
 		};
 
-		switch (sdkMessage.type) {
-			case 'system':
-				if (sdkMessage.subtype === 'init') {
-					return {
-						...baseMessage,
-						type: 'system',
-						subtype: 'init',
-						session_id: sdkMessage.session_id || baseMessage.session_id
-					};
-				}
-				return null;
+		if (sessionId) {
+			options.resume = sessionId;
+		}
 
-			case 'assistant':
-				if (sdkMessage.message) {
-					return {
-						...baseMessage,
-						type: 'assistant',
-						message: {
-							id: sdkMessage.message.id || `msg-${Date.now()}`,
-							role: 'assistant',
-							content: sdkMessage.message.content || [],
-							model: sdkMessage.message.model,
-							usage: sdkMessage.message.usage
-						}
-					};
-				}
-				return null;
+		return options;
+	}
 
-			case 'user':
-				// Tool result messages from SDK
-				if (sdkMessage.message) {
-					return {
-						...baseMessage,
-						type: 'user',
-						message: {
-							id: sdkMessage.message.id || `msg-${Date.now()}`,
-							role: 'user',
-							content: sdkMessage.message.content || []
-						}
-					};
-				}
-				return null;
-
-			case 'result':
-				return {
-					...baseMessage,
-					type: 'result',
-					subtype: sdkMessage.subtype || 'success',
-					duration_ms: sdkMessage.duration_ms,
-					duration_api_ms: sdkMessage.duration_api_ms,
-					is_error: sdkMessage.is_error,
-					num_turns: sdkMessage.num_turns,
-					result: sdkMessage.result,
-					total_cost_usd: sdkMessage.total_cost_usd
-				};
-
-			default:
-				return null;
+	private handleError(
+		error: unknown,
+		sessionId: string | null,
+		onMessage: (message: ChatMessage) => void,
+		onError: (error: Error) => void
+	): void {
+		if (error instanceof Error && error.name === 'AbortError') {
+			const cancelMessage = MessageFactory.createCancelMessage(sessionId);
+			onMessage(cancelMessage);
+		} else {
+			onError(error instanceof Error ? error : new Error(String(error)));
 		}
 	}
 }
