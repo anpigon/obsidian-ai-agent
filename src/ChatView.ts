@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, setIcon } from 'obsidian';
+import { ItemView, WorkspaceLeaf, setIcon, MarkdownView, TFile } from 'obsidian';
 import type { AIChatSettings, ChatMessage } from './types';
 import { AgentService } from './AgentService';
 import { ChatRenderer } from './ChatRenderer';
@@ -120,9 +120,40 @@ export class AIChatView extends ItemView {
 	private createInputArea(container: HTMLElement): void {
 		this.inputContainer = container.createEl('div', { cls: 'ai-chat-input-container' });
 
+		this.createQuickActions();
 		this.createFileContextToggle();
 		this.createInputField();
 		this.createButtonContainer();
+	}
+
+	// Phase 2-F: 빠른 액션 버튼 생성
+	private createQuickActions(): void {
+		const quickActionsEl = this.inputContainer.createEl('div', { cls: 'ai-quick-actions' });
+
+		const actions = [
+			{ icon: 'file-text', label: 'Summarize', prompt: 'Please summarize this document concisely.' },
+			{ icon: 'edit', label: 'Improve', prompt: 'Please improve the writing style and fix any errors.' },
+			{ icon: 'search', label: 'Analyze', prompt: 'Please analyze this document and provide insights.' },
+			{ icon: 'languages', label: 'Translate', prompt: 'Please translate this text to English. If already in English, translate to Korean.' },
+		];
+
+		for (const action of actions) {
+			const button = quickActionsEl.createEl('button', {
+				cls: 'ai-quick-action-button',
+				attr: { 'aria-label': action.label }
+			});
+
+			const iconEl = button.createEl('span', { cls: 'ai-quick-action-icon' });
+			setIcon(iconEl, action.icon);
+
+			button.createEl('span', { text: action.label, cls: 'ai-quick-action-label' });
+
+			button.addEventListener('click', () => {
+				if (!this.isProcessing) {
+					this.sendMessage(action.prompt);
+				}
+			});
+		}
 	}
 
 	private createFileContextToggle(): void {
@@ -221,7 +252,7 @@ export class AIChatView extends ItemView {
 		const messageText = this.inputField.value.trim();
 		if (!messageText || this.isProcessing) return;
 
-		const finalMessage = this.buildFinalMessage(messageText);
+		const finalMessage = await this.buildFinalMessage(messageText);
 		this.logDebugContext(messageText, finalMessage);
 
 		const userMessage = MessageFactory.createUserInputMessage(messageText, this.currentSessionId);
@@ -235,14 +266,80 @@ export class AIChatView extends ItemView {
 		this.setProcessingState(false);
 	}
 
-	private buildFinalMessage(messageText: string): string {
-		if (this.includeFileContext) {
-			const currentFile = this.getCurrentFilePath();
-			if (currentFile) {
-				return `Current file context: ${currentFile}\n\n${messageText}`;
+	private async buildFinalMessage(messageText: string): Promise<string> {
+		if (!this.includeFileContext) {
+			return messageText;
+		}
+
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) {
+			return messageText;
+		}
+
+		const contextParts: string[] = [];
+		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
+		const filePath = `${vaultPath}/${activeFile.path}`;
+
+		// 파일 경로 추가
+		contextParts.push(`Current file: ${filePath}`);
+
+		// Phase 1-A: 파일 내용 컨텍스트
+		if (this.settings.includeFileContent) {
+			try {
+				// 선택 영역이 있는 경우 선택 영역만 포함
+				if (this.settings.includeSelection) {
+					const selection = this.getActiveSelection();
+					if (selection) {
+						contextParts.push(`\nSelected text:\n\`\`\`\n${selection}\n\`\`\``);
+					} else {
+						// 선택 영역이 없으면 전체 파일 내용 포함
+						const content = await this.getFileContent(activeFile);
+						if (content) {
+							contextParts.push(`\nFile content:\n\`\`\`\n${content}\n\`\`\``);
+						}
+					}
+				} else {
+					// 선택 영역 옵션이 비활성화된 경우 전체 파일 내용 포함
+					const content = await this.getFileContent(activeFile);
+					if (content) {
+						contextParts.push(`\nFile content:\n\`\`\`\n${content}\n\`\`\``);
+					}
+				}
+			} catch (error) {
+				console.warn('Failed to read file content:', error);
 			}
 		}
-		return messageText;
+
+		return `${contextParts.join('\n')}\n\n${messageText}`;
+	}
+
+	private getActiveSelection(): string | null {
+		const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+
+		if (markdownView?.editor) {
+			const selection = markdownView.editor.getSelection();
+			if (selection && selection.trim().length > 0) {
+				return selection;
+			}
+		}
+
+		return null;
+	}
+
+	private async getFileContent(file: TFile): Promise<string | null> {
+		try {
+			const content = await this.app.vault.read(file);
+			const maxLength = this.settings.maxContentLength || 10000;
+
+			if (content.length > maxLength) {
+				return content.substring(0, maxLength) + `\n\n... (truncated, ${content.length - maxLength} characters omitted)`;
+			}
+
+			return content;
+		} catch (error) {
+			console.warn('Failed to read file:', error);
+			return null;
+		}
 	}
 
 	private logDebugContext(originalMessage: string, finalMessage: string): void {
@@ -365,5 +462,104 @@ export class AIChatView extends ItemView {
 	updateSettings(settings: AIChatSettings): void {
 		this.settings = settings;
 		this.agentService.updateSettings(settings);
+	}
+
+	// Phase 1-D: 외부에서 메시지 전송
+	async sendMessage(message: string): Promise<void> {
+		if (this.isProcessing) return;
+
+		this.inputField.value = message;
+		await this.handleSendMessage();
+	}
+
+	// Phase 1-D: 외부에서 새 채팅 시작
+	startNewChatFromCommand(): void {
+		this.startNewChat();
+	}
+
+	// Phase 2-B: 대화 저장
+	async saveConversation(): Promise<void> {
+		if (this.messages.length === 0) {
+			return;
+		}
+
+		const savePath = this.settings.conversationSavePath || 'AI-Chats';
+		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+		const fileName = `${savePath}/chat-${timestamp}.md`;
+
+		// 폴더 생성
+		try {
+			const folder = this.app.vault.getAbstractFileByPath(savePath);
+			if (!folder) {
+				await this.app.vault.createFolder(savePath);
+			}
+		} catch {
+			// 폴더가 이미 존재하면 무시
+		}
+
+		// 마크다운 생성
+		const markdown = this.generateMarkdown();
+
+		// 파일 저장
+		try {
+			await this.app.vault.create(fileName, markdown);
+			console.log(`Conversation saved to ${fileName}`);
+		} catch (error) {
+			console.error('Failed to save conversation:', error);
+		}
+	}
+
+	// Phase 2-B: 마크다운 생성
+	private generateMarkdown(): string {
+		const lines: string[] = [];
+		const now = new Date();
+
+		// 프론트매터
+		lines.push('---');
+		lines.push(`date: ${now.toISOString().slice(0, 10)}`);
+		lines.push(`time: ${now.toLocaleTimeString()}`);
+		lines.push(`model: ${this.settings.model || 'unknown'}`);
+		if (this.currentSessionId) {
+			lines.push(`session_id: ${this.currentSessionId}`);
+		}
+		lines.push('---');
+		lines.push('');
+		lines.push(`# AI Chat - ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`);
+		lines.push('');
+
+		// 메시지 변환
+		for (const msg of this.messages) {
+			if (msg.type === 'user' && 'isUserInput' in msg && msg.isUserInput) {
+				lines.push('## User');
+				const content = msg.message.content;
+				for (const block of content) {
+					if (block.type === 'text') {
+						lines.push(block.text);
+					}
+				}
+				lines.push('');
+			} else if (msg.type === 'assistant') {
+				lines.push('## Assistant');
+				const content = msg.message.content;
+				for (const block of content) {
+					if (block.type === 'text') {
+						lines.push(block.text);
+					} else if (block.type === 'tool_use') {
+						lines.push(`> Using tool: ${block.name}`);
+					}
+				}
+				lines.push('');
+			} else if (msg.type === 'result' && msg.result) {
+				lines.push('## Result');
+				lines.push(msg.result);
+				lines.push('');
+				if (msg.duration_ms) {
+					lines.push(`*Duration: ${(msg.duration_ms / 1000).toFixed(2)}s*`);
+				}
+				lines.push('');
+			}
+		}
+
+		return lines.join('\n');
 	}
 }

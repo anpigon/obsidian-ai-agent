@@ -114,6 +114,11 @@ export class AgentService {
 			options.resume = sessionId;
 		}
 
+		// Phase 1-E: 시스템 프롬프트 적용
+		if (this.settings.systemPrompt && this.settings.systemPrompt.trim()) {
+			options.systemPrompt = this.settings.systemPrompt.trim();
+		}
+
 		return options;
 	}
 

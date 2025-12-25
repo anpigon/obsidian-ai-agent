@@ -4,12 +4,30 @@ export interface AIChatSettings {
 	apiKey?: string;
 	model?: string;
 	debugContext?: boolean;
+	// Phase 1-A: 파일 내용 컨텍스트 설정
+	includeFileContent?: boolean;
+	maxContentLength?: number;
+	includeSelection?: boolean;
+	// Phase 1-E: 시스템 프롬프트 설정
+	systemPrompt?: string;
+	// Phase 2-B: 대화 저장 설정
+	autoSaveConversations?: boolean;
+	conversationSavePath?: string;
 }
 
 export const DEFAULT_SETTINGS: AIChatSettings = {
 	apiKey: '',
 	model: 'claude-sonnet-4-20250514',
-	debugContext: false
+	debugContext: false,
+	// Phase 1-A: 파일 내용 컨텍스트 기본값
+	includeFileContent: true,
+	maxContentLength: 10000,
+	includeSelection: true,
+	// Phase 1-E: 시스템 프롬프트 기본값
+	systemPrompt: '',
+	// Phase 2-B: 대화 저장 기본값
+	autoSaveConversations: false,
+	conversationSavePath: 'AI-Chats'
 };
 
 // 사용 가능한 모델 목록

@@ -428,3 +428,117 @@
 	align-self: flex-start;
 	width: 100%;
 }
+
+/* ==================== Phase 2-F: Quick Actions ==================== */
+.ai-quick-actions {
+	display: flex;
+	gap: 4px;
+	padding: 6px;
+	flex-wrap: wrap;
+}
+
+.ai-quick-action-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 8px;
+	border-radius: var(--radius);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	box-shadow: none !important;
+}
+
+.ai-quick-action-button:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	border-color: var(--interactive-accent);
+}
+
+.ai-quick-action-button:active {
+	transform: scale(0.98);
+}
+
+.ai-quick-action-icon {
+	display: flex;
+	align-items: center;
+}
+
+.ai-quick-action-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+.ai-quick-action-label {
+	font-weight: 500;
+}
+
+/* ==================== Phase 2-G: Code Block Styles ==================== */
+.ai-code-block {
+	margin: 8px 0;
+	border-radius: var(--radius);
+	border: 1px solid var(--background-modifier-border);
+	overflow: hidden;
+}
+
+.ai-code-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 4px 8px;
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ai-code-language {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	font-weight: 500;
+}
+
+.ai-copy-button {
+	padding: 2px 8px;
+	font-size: var(--font-smallest);
+	border-radius: var(--radius);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.ai-copy-button:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.ai-copy-button.copied {
+	background: var(--interactive-success);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-success);
+}
+
+.ai-code-block pre {
+	margin: 0;
+	padding: 8px;
+	overflow-x: auto;
+	background: var(--background-primary);
+}
+
+.ai-code-block code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
+	line-height: 1.4;
+}
+
+.ai-inline-code {
+	padding: 1px 4px;
+	border-radius: 3px;
+	background: var(--background-secondary);
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+}
