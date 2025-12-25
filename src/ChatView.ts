@@ -387,6 +387,10 @@ export class AIChatView extends ItemView {
 					this.addMessage(message);
 				},
 				onError: (error: Error) => {
+					console.error('AgentService onError:', error);
+					if (error.stack) {
+						console.error('Stack trace:', error.stack);
+					}
 					const errorMessage = MessageFactory.createErrorMessage(error, this.currentSessionId);
 					this.addMessage(errorMessage);
 				},
@@ -399,6 +403,10 @@ export class AIChatView extends ItemView {
 				this.currentSessionId = sessionId;
 			}
 		} catch (error) {
+			console.error('executeCommand error:', error);
+			if (error instanceof Error && error.stack) {
+				console.error('Stack trace:', error.stack);
+			}
 			const errorMessage = MessageFactory.createErrorMessage(
 				error instanceof Error ? error : new Error(String(error)),
 				this.currentSessionId

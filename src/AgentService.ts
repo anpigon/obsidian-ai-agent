@@ -136,6 +136,12 @@ export class AgentService {
 		onMessage: (message: ChatMessage) => void,
 		onError: (error: Error) => void
 	): void {
+		// Log full error for debugging
+		console.error('AgentService error:', error);
+		if (error instanceof Error && error.stack) {
+			console.error('Stack trace:', error.stack);
+		}
+
 		if (error instanceof Error && error.name === 'AbortError') {
 			const cancelMessage = MessageFactory.createCancelMessage(sessionId);
 			onMessage(cancelMessage);
