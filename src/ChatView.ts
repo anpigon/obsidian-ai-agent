@@ -277,8 +277,8 @@ export class AIChatView extends ItemView {
 		}
 
 		const contextParts: string[] = [];
-		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
-		const filePath = `${vaultPath}/${activeFile.path}`;
+		const vaultPath = this.getVaultBasePath();
+		const filePath = vaultPath ? `${vaultPath}/${activeFile.path}` : activeFile.path;
 
 		// 파일 경로 추가
 		contextParts.push(`Current file: ${filePath}`);
@@ -359,7 +359,15 @@ export class AIChatView extends ItemView {
 	}
 
 	private async executeCommand(prompt: string): Promise<void> {
-		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath || process.cwd();
+		const vaultPath = this.getVaultBasePath();
+		if (!vaultPath) {
+			const errorMessage = MessageFactory.createErrorMessage(
+				new Error('Unable to determine vault path. This plugin requires a local vault.'),
+				this.currentSessionId
+			);
+			this.addMessage(errorMessage);
+			return;
+		}
 
 		try {
 			const sessionId = await this.agentService.execute({
@@ -409,6 +417,15 @@ export class AIChatView extends ItemView {
 
 	// ==================== 유틸리티 ====================
 
+	/**
+	 * vault의 기본 경로를 안전하게 가져옵니다.
+	 * basePath가 undefined인 경우 빈 문자열을 반환합니다.
+	 */
+	private getVaultBasePath(): string {
+		const adapter = this.app.vault.adapter as { basePath?: string };
+		return adapter.basePath || '';
+	}
+
 	private autoResizeTextarea(): void {
 		this.inputField.style.height = 'auto';
 
@@ -427,8 +444,8 @@ export class AIChatView extends ItemView {
 	private getCurrentFilePath(): string | null {
 		const activeFile = this.app.workspace.getActiveFile();
 		if (activeFile) {
-			const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
-			return `${vaultPath}/${activeFile.path}`;
+			const vaultPath = this.getVaultBasePath();
+			return vaultPath ? `${vaultPath}/${activeFile.path}` : activeFile.path;
 		}
 		return null;
 	}
