@@ -47,6 +47,28 @@ export class AIChatSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ==================== Claude CLI 설정 ====================
+		containerEl.createEl('h3', { text: 'Claude CLI' });
+
+		new Setting(containerEl)
+			.setName('Claude CLI path')
+			.setDesc('Path to the claude executable. Leave empty to auto-detect from common installation paths.')
+			.addText(text => text
+				.setPlaceholder('Auto-detect (leave empty)')
+				.setValue(this.plugin.settings.claudeExecutablePath || '')
+				.onChange(async (value) => {
+					this.plugin.settings.claudeExecutablePath = value;
+					await this.plugin.saveSettings();
+					this.updateViews();
+				}));
+
+		const cliInfoEl = containerEl.createEl('div', { cls: 'setting-item-description' });
+		cliInfoEl.createEl('small', {
+			text: 'Common paths: ~/.local/bin/claude (macOS/Linux), %USERPROFILE%\\.local\\bin\\claude.exe (Windows)'
+		});
+		cliInfoEl.style.marginTop = '-10px';
+		cliInfoEl.style.marginBottom = '10px';
+
 		// Debug context
 		new Setting(containerEl)
 			.setName('Debug mode')

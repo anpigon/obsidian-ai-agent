@@ -4,6 +4,8 @@ export interface AIChatSettings {
 	apiKey?: string;
 	model?: string;
 	debugContext?: boolean;
+	// Claude CLI 경로 설정
+	claudeExecutablePath?: string;
 	// Phase 1-A: 파일 내용 컨텍스트 설정
 	includeFileContent?: boolean;
 	maxContentLength?: number;
@@ -19,6 +21,8 @@ export const DEFAULT_SETTINGS: AIChatSettings = {
 	apiKey: '',
 	model: 'claude-sonnet-4-20250514',
 	debugContext: false,
+	// Claude CLI 경로 (빈 값이면 자동 탐지)
+	claudeExecutablePath: '',
 	// Phase 1-A: 파일 내용 컨텍스트 기본값
 	includeFileContent: true,
 	maxContentLength: 10000,
