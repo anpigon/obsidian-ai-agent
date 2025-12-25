@@ -41,6 +41,13 @@ export class AgentService {
 	async execute(options: AgentExecutionOptions): Promise<string | null> {
 		const { prompt, workingDirectory, sessionId, onMessage, onError, onComplete, signal } = options;
 
+		// Validate workingDirectory
+		if (!workingDirectory || typeof workingDirectory !== 'string') {
+			onError(new Error(`Invalid working directory: ${workingDirectory}`));
+			onComplete();
+			return sessionId || null;
+		}
+
 		this.currentAbortController = new AbortController();
 
 		// 외부 시그널과 내부 abort controller 연결
@@ -108,6 +115,7 @@ export class AgentService {
 			model: this.settings.model || 'claude-sonnet-4-20250514',
 			cwd: workingDirectory,
 			permissionMode: 'bypassPermissions' as const,
+			allowDangerouslySkipPermissions: true,
 		};
 
 		if (sessionId) {
