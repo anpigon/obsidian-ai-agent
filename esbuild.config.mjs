@@ -31,6 +31,7 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
+		"@anthropic-ai/claude-agent-sdk",
 		...builtins],
 	format: "cjs",
 	target: "es2018",
