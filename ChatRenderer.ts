@@ -1,0 +1,320 @@
+import { setIcon } from 'obsidian';
+import type {
+	ChatMessage,
+	ContentBlock,
+	TextBlock,
+	ToolUseBlock,
+	ToolResultBlock,
+	UserChatMessage,
+	AssistantChatMessage
+} from './types';
+
+/**
+ * ChatRenderer - 채팅 메시지 렌더링을 담당하는 클래스
+ *
+ * 책임:
+ * - 메시지 타입별 렌더링
+ * - 콘텐츠 블록 렌더링 (텍스트, 도구 사용, 도구 결과)
+ * - 텍스트 포맷팅
+ */
+export class ChatRenderer {
+	private messagesContainer: HTMLElement;
+
+	constructor(messagesContainer: HTMLElement) {
+		this.messagesContainer = messagesContainer;
+	}
+
+	/**
+	 * 메인 렌더링 메서드 - 메시지 타입에 따라 적절한 렌더러 호출
+	 */
+	renderMessage(chatMessage: ChatMessage): void {
+		try {
+			const messageEl = this.createMessageElement(chatMessage);
+
+			if (chatMessage.type === 'user' && !chatMessage.isUserInput) {
+				this.renderThinkingMessage(messageEl, chatMessage);
+			} else if (chatMessage.type === 'assistant') {
+				this.renderAssistantThought(messageEl, chatMessage);
+			} else if (chatMessage.type === 'result') {
+				this.renderFinalResponse(messageEl, chatMessage);
+			} else {
+				const contentEl = messageEl.createEl('div', { cls: 'ai-message-content' });
+				this.renderMessageContent(contentEl, chatMessage);
+			}
+
+			this.renderTimestamp(messageEl, chatMessage);
+			this.scrollToBottom();
+		} catch (error) {
+			console.error('Error rendering message:', error, chatMessage);
+		}
+	}
+
+	/**
+	 * 메시지 요소 생성 및 CSS 클래스 적용
+	 */
+	private createMessageElement(chatMessage: ChatMessage): HTMLElement {
+		let cssClass = 'ai-chat-message';
+
+		if (chatMessage.type === 'user' && chatMessage.isUserInput) {
+			cssClass += ' ai-chat-message-user';
+		} else if (chatMessage.type === 'result') {
+			cssClass += ' ai-chat-message-final-response';
+		} else {
+			cssClass += ' ai-chat-message-assistant';
+		}
+
+		return this.messagesContainer.createEl('div', { cls: cssClass });
+	}
+
+	/**
+	 * 타임스탬프 렌더링
+	 */
+	private renderTimestamp(messageEl: HTMLElement, chatMessage: ChatMessage): void {
+		const showTimestamp =
+			chatMessage.timestamp &&
+			((chatMessage.type === 'user' && chatMessage.isUserInput) || chatMessage.type === 'result');
+
+		if (showTimestamp) {
+			const timestampEl = messageEl.createEl('div', { cls: 'ai-message-timestamp' });
+			timestampEl.setText(chatMessage.timestamp!.toLocaleTimeString());
+		}
+	}
+
+	/**
+	 * 스크롤을 메시지 컨테이너 하단으로 이동
+	 */
+	private scrollToBottom(): void {
+		requestAnimationFrame(() => {
+			this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+		});
+	}
+
+	/**
+	 * 메시지 콘텐츠 렌더링 - 콘텐츠 블록 타입별 처리
+	 */
+	renderMessageContent(container: HTMLElement, chatMessage: ChatMessage): void {
+		try {
+			if (chatMessage.type === 'user' || chatMessage.type === 'assistant') {
+				this.renderContentBlocks(container, chatMessage.message.content);
+			} else if (chatMessage.type === 'result' && chatMessage.result) {
+				this.renderResult(container, chatMessage.result);
+			} else if (chatMessage.type === 'system') {
+				if (chatMessage.subtype === 'init') {
+					this.renderInitMessage(container);
+				} else if (chatMessage.result) {
+					this.renderResult(container, chatMessage.result);
+				} else if (chatMessage.subtype) {
+					container.createEl('div', { text: `System: ${chatMessage.subtype}` });
+				}
+			}
+		} catch (error) {
+			console.warn('Error rendering message content:', error, chatMessage);
+			container.createEl('div', {
+				text: 'Error rendering message content',
+				cls: 'ai-error-message'
+			});
+		}
+	}
+
+	/**
+	 * 콘텐츠 블록 배열 렌더링
+	 */
+	private renderContentBlocks(container: HTMLElement, contents: ContentBlock[]): void {
+		contents.forEach((content: ContentBlock) => {
+			switch (content.type) {
+				case 'text':
+					this.renderTextBlock(container, content);
+					break;
+				case 'tool_use':
+					this.renderToolUseBlock(container, content);
+					break;
+				case 'tool_result':
+					this.renderToolResultBlock(container, content);
+					break;
+			}
+		});
+	}
+
+	/**
+	 * 텍스트 블록 렌더링
+	 */
+	private renderTextBlock(container: HTMLElement, content: TextBlock): void {
+		const textEl = container.createEl('div', { cls: 'ai-message-text' });
+		textEl.innerHTML = this.formatText(content.text);
+	}
+
+	/**
+	 * 도구 사용 블록 렌더링
+	 */
+	private renderToolUseBlock(container: HTMLElement, content: ToolUseBlock): void {
+		if (content.name === 'TodoWrite') {
+			this.renderTodoCard(container, content);
+		} else {
+			this.renderCollapsibleTool(container, content);
+		}
+	}
+
+	/**
+	 * 도구 결과 블록 렌더링
+	 */
+	private renderToolResultBlock(container: HTMLElement, content: ToolResultBlock): void {
+		const resultEl = container.createEl('div', { cls: 'ai-tool-result' });
+		const pre = resultEl.createEl('pre');
+		const resultContent = content.content;
+		const resultText = resultContent || 'No content';
+		pre.createEl('code', {
+			text: typeof resultText === 'string' ? resultText : JSON.stringify(resultText, null, 2)
+		});
+	}
+
+	/**
+	 * 결과 메시지 렌더링
+	 */
+	private renderResult(container: HTMLElement, result: string): void {
+		const resultEl = container.createEl('div', { cls: 'ai-final-result' });
+		resultEl.innerHTML = this.formatText(result);
+	}
+
+	/**
+	 * 초기화 메시지 렌더링
+	 */
+	private renderInitMessage(container: HTMLElement): void {
+		container.createEl('div', {
+			text: 'Cooking...',
+			cls: 'ai-system-init'
+		});
+	}
+
+	/**
+	 * Todo 카드 렌더링
+	 */
+	renderTodoCard(container: HTMLElement, content: ToolUseBlock): void {
+		const cardEl = container.createEl('div', { cls: 'ai-todo-card' });
+		const headerEl = cardEl.createEl('div', { cls: 'ai-todo-header' });
+		headerEl.createEl('span', { text: 'Tasks', cls: 'ai-todo-title' });
+
+		const input = content.input as { todos?: Array<{ status: string; content: string }> };
+		if (input?.todos) {
+			const todosEl = cardEl.createEl('div', { cls: 'ai-todos-list' });
+			input.todos.forEach((todo) => {
+				this.renderTodoItem(todosEl, todo);
+			});
+		}
+	}
+
+	/**
+	 * 개별 Todo 아이템 렌더링
+	 */
+	private renderTodoItem(container: HTMLElement, todo: { status: string; content: string }): void {
+		const todoEl = container.createEl('div', { cls: 'ai-todo-item' });
+		const iconEl = todoEl.createEl('span', { cls: 'ai-todo-status' });
+
+		const iconName = this.getTodoStatusIcon(todo.status);
+		setIcon(iconEl, iconName);
+
+		todoEl.createEl('span', { text: todo.content, cls: 'ai-todo-content' });
+	}
+
+	/**
+	 * Todo 상태에 따른 아이콘 이름 반환
+	 */
+	private getTodoStatusIcon(status: string): string {
+		switch (status) {
+			case 'completed':
+				return 'circle-check';
+			case 'in_progress':
+				return 'circle-ellipsis';
+			default:
+				return 'circle';
+		}
+	}
+
+	/**
+	 * 접을 수 있는 도구 블록 렌더링
+	 */
+	renderCollapsibleTool(container: HTMLElement, content: ToolUseBlock): void {
+		const toolEl = container.createEl('div', { cls: 'ai-tool-collapsible' });
+		const headerEl = toolEl.createEl('div', { cls: 'ai-tool-header clickable' });
+
+		headerEl.createEl('span', {
+			text: `Using tool: ${content.name || 'Unknown'}`,
+			cls: 'ai-tool-name'
+		});
+
+		const contentEl = toolEl.createEl('div', { cls: 'ai-tool-content collapsed' });
+		if (content.input) {
+			const pre = contentEl.createEl('pre');
+			pre.createEl('code', { text: JSON.stringify(content.input, null, 2) });
+		}
+
+		this.addCollapseToggle(headerEl, contentEl);
+	}
+
+	/**
+	 * Thinking 메시지 렌더링 (접을 수 있는 형태)
+	 */
+	renderThinkingMessage(messageEl: HTMLElement, chatMessage: UserChatMessage): void {
+		const hasToolResults = chatMessage.message.content.some(
+			content => content.type === 'tool_result'
+		);
+		const headerText = hasToolResults ? 'Tool result' : 'Thinking...';
+
+		const headerEl = messageEl.createEl('div', { cls: 'ai-thinking-header clickable' });
+		headerEl.createEl('span', { text: headerText, cls: 'ai-thinking-label' });
+
+		const contentEl = messageEl.createEl('div', { cls: 'ai-thinking-content collapsed' });
+		this.renderMessageContent(contentEl, chatMessage);
+
+		this.addCollapseToggle(headerEl, contentEl);
+	}
+
+	/**
+	 * Assistant 사고 메시지 렌더링
+	 */
+	renderAssistantThought(messageEl: HTMLElement, chatMessage: AssistantChatMessage): void {
+		const contentEl = messageEl.createEl('div', { cls: 'ai-message-content ai-self-thought' });
+		this.renderMessageContent(contentEl, chatMessage);
+	}
+
+	/**
+	 * 최종 응답 렌더링
+	 */
+	renderFinalResponse(messageEl: HTMLElement, chatMessage: ChatMessage): void {
+		const contentEl = messageEl.createEl('div', { cls: 'ai-message-content ai-final-response' });
+		this.renderMessageContent(contentEl, chatMessage);
+	}
+
+	/**
+	 * 접기/펼치기 토글 이벤트 추가
+	 */
+	private addCollapseToggle(headerEl: HTMLElement, contentEl: HTMLElement): void {
+		headerEl.addEventListener('click', () => {
+			contentEl.toggleClass('collapsed', !contentEl.hasClass('collapsed'));
+		});
+	}
+
+	/**
+	 * 텍스트 마크다운 포맷팅
+	 */
+	formatText(text: string): string {
+		return text
+			.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+			.replace(/\*(.*?)\*/g, '<em>$1</em>')
+			.replace(/`(.*?)`/g, '<code>$1</code>')
+			.replace(/\n/g, '<br>');
+	}
+
+	/**
+	 * 메시지 컨테이너 업데이트
+	 */
+	updateContainer(messagesContainer: HTMLElement): void {
+		this.messagesContainer = messagesContainer;
+	}
+
+	/**
+	 * 메시지 컨테이너 비우기
+	 */
+	clear(): void {
+		this.messagesContainer.empty();
+	}
+}

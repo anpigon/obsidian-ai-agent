@@ -1,24 +1,41 @@
 import { ItemView, WorkspaceLeaf, setIcon } from 'obsidian';
-import type { AIChatSettings, ChatMessage, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock, Message } from './types';
+import type { AIChatSettings, ChatMessage } from './types';
 import { AgentService } from './AgentService';
+import { ChatRenderer } from './ChatRenderer';
+import { MessageFactory } from './MessageFactory';
+import { createExampleMessages } from './exampleMessages';
 
 export const VIEW_TYPE_AI_CHAT = 'ai-chat-view';
 
+/**
+ * AIChatView - AI 채팅 인터페이스의 메인 뷰 클래스
+ *
+ * 책임:
+ * - Obsidian ItemView 라이프사이클 관리
+ * - 채팅 UI 초기화 및 이벤트 핸들링
+ * - 메시지 상태 관리
+ * - AgentService와의 통신 조율
+ */
 export class AIChatView extends ItemView {
-	settings: AIChatSettings;
-	messages: ChatMessage[] = [];
-	chatContainer: HTMLElement;
-	messagesContainer: HTMLElement;
-	inputContainer: HTMLElement;
-	inputField: HTMLTextAreaElement;
-	currentSessionId: string | null = null;
-	includeFileContext: boolean = true;
-	fileContextHeader: HTMLElement;
-	isProcessing: boolean = false;
-	sendButton: HTMLButtonElement;
-	loadingIndicator: HTMLElement;
-	agentService: AgentService;
-	currentAbortController: AbortController | null = null;
+	// 설정 및 서비스
+	private settings: AIChatSettings;
+	private agentService: AgentService;
+	private renderer: ChatRenderer;
+
+	// 상태
+	private messages: ChatMessage[] = [];
+	private currentSessionId: string | null = null;
+	private includeFileContext: boolean = true;
+	private isProcessing: boolean = false;
+
+	// DOM 요소
+	private chatContainer: HTMLElement;
+	private messagesContainer: HTMLElement;
+	private inputContainer: HTMLElement;
+	private inputField: HTMLTextAreaElement;
+	private sendButton: HTMLButtonElement;
+	private loadingIndicator: HTMLElement;
+	private fileContextHeader: HTMLElement;
 
 	constructor(leaf: WorkspaceLeaf, settings: AIChatSettings) {
 		super(leaf);
@@ -26,28 +43,42 @@ export class AIChatView extends ItemView {
 		this.agentService = new AgentService(settings);
 	}
 
-	getViewType() {
+	getViewType(): string {
 		return VIEW_TYPE_AI_CHAT;
 	}
 
-	getDisplayText() {
+	getDisplayText(): string {
 		return 'AI Chat';
 	}
 
-	getIcon() {
+	getIcon(): string {
 		return 'sparkles';
 	}
 
-	async onOpen() {
+	async onOpen(): Promise<void> {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass('ai-chat-container');
 
 		this.createChatInterface(container);
+		this.renderer = new ChatRenderer(this.messagesContainer);
 	}
 
-	createChatInterface(container: HTMLElement) {
-		// Add header with new chat button
+	async onClose(): Promise<void> {
+		if (this.isProcessing) {
+			this.agentService.cancel();
+		}
+	}
+
+	// ==================== UI 생성 ====================
+
+	private createChatInterface(container: HTMLElement): void {
+		this.createHeader(container);
+		this.createChatBody(container);
+		this.createInputArea(container);
+	}
+
+	private createHeader(container: HTMLElement): void {
 		const headerEl = container.createEl('div', { cls: 'ai-chat-header' });
 
 		headerEl.createEl('div', {
@@ -57,58 +88,65 @@ export class AIChatView extends ItemView {
 
 		const buttonGroupEl = headerEl.createEl('div', { cls: 'ai-header-buttons' });
 
+		// Examples 버튼
 		const examplesButton = buttonGroupEl.createEl('button', {
 			text: 'Examples',
 			cls: 'ai-examples-button'
 		});
+		examplesButton.addEventListener('click', () => this.showExamples());
 
+		// Settings 버튼
 		const settingsButton = buttonGroupEl.createEl('button', {
 			cls: 'ai-settings-button',
 			attr: { 'aria-label': 'Plugin settings' }
 		});
 		setIcon(settingsButton, 'settings');
+		settingsButton.addEventListener('click', () => this.openSettings());
 
+		// New Chat 버튼
 		const newChatButton = buttonGroupEl.createEl('button', {
 			cls: 'ai-new-chat-button',
 			attr: { 'aria-label': 'New chat' }
 		});
 		setIcon(newChatButton, 'plus');
-
 		newChatButton.addEventListener('click', () => this.startNewChat());
-		settingsButton.addEventListener('click', () => this.openSettings());
-		examplesButton.addEventListener('click', () => {
-			this.startNewChat();
-			this.addExampleMessages();
-		});
+	}
 
+	private createChatBody(container: HTMLElement): void {
 		this.chatContainer = container.createEl('div', { cls: 'ai-chat-body' });
-
 		this.messagesContainer = this.chatContainer.createEl('div', { cls: 'ai-chat-messages' });
+	}
 
+	private createInputArea(container: HTMLElement): void {
 		this.inputContainer = container.createEl('div', { cls: 'ai-chat-input-container' });
 
-		// Add file context header above the input field
+		this.createFileContextToggle();
+		this.createInputField();
+		this.createButtonContainer();
+	}
+
+	private createFileContextToggle(): void {
 		this.fileContextHeader = this.inputContainer.createEl('div', { cls: 'ai-file-context-header' });
 		const fileContextToggle = this.fileContextHeader.createEl('div', {
 			cls: 'ai-file-context-toggle',
-			attr: { 'aria-label': 'Add current page\'s context to message' }
+			attr: { 'aria-label': "Add current page's context to message" }
 		});
 
 		const fileIcon = fileContextToggle.createEl('span', { cls: 'ai-file-context-icon' });
 		setIcon(fileIcon, 'file-text');
 
 		const fileContextText = fileContextToggle.createEl('span', { cls: 'ai-file-context-text' });
-		this.updateFileContextDisplay(fileContextText);
+		fileContextText.setText('Current page');
 
-		// Set initial active state based on includeFileContext
 		fileContextToggle.toggleClass('active', this.includeFileContext);
 
 		fileContextToggle.addEventListener('click', () => {
 			this.includeFileContext = !this.includeFileContext;
 			fileContextToggle.toggleClass('active', this.includeFileContext);
-			this.updateFileContextDisplay(fileContextText);
 		});
+	}
 
+	private createInputField(): void {
 		this.inputField = this.inputContainer.createEl('textarea', {
 			cls: 'ai-chat-input',
 			attr: {
@@ -117,9 +155,20 @@ export class AIChatView extends ItemView {
 			}
 		}) as HTMLTextAreaElement;
 
+		this.inputField.addEventListener('keydown', (e: KeyboardEvent) => {
+			if (e.key === 'Enter' && !e.shiftKey) {
+				e.preventDefault();
+				this.handleButtonClick();
+			}
+		});
+
+		this.inputField.addEventListener('input', () => this.autoResizeTextarea());
+		this.autoResizeTextarea();
+	}
+
+	private createButtonContainer(): void {
 		const buttonContainer = this.inputContainer.createEl('div', { cls: 'ai-chat-button-container' });
 
-		// Create loading indicator (initially hidden)
 		this.loadingIndicator = buttonContainer.createEl('div', { cls: 'ai-loading-indicator hidden' });
 		this.loadingIndicator.createEl('div', { cls: 'ai-loading-spinner' });
 
@@ -128,252 +177,12 @@ export class AIChatView extends ItemView {
 			attr: { 'aria-label': 'Send message' }
 		}) as HTMLButtonElement;
 		setIcon(this.sendButton, 'corner-down-right');
-
 		this.sendButton.addEventListener('click', () => this.handleButtonClick());
-		this.inputField.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter' && !e.shiftKey) {
-				e.preventDefault();
-				this.handleButtonClick();
-			}
-		});
-
-		// Auto-resize functionality
-		this.inputField.addEventListener('input', () => {
-			this.autoResizeTextarea();
-		});
-
-		// Set initial height
-		this.autoResizeTextarea();
 	}
 
-	autoResizeTextarea() {
-		this.inputField.style.height = 'auto';
+	// ==================== 상태 관리 ====================
 
-		const computedStyle = getComputedStyle(this.inputField);
-		const minHeight = parseFloat(computedStyle.minHeight);
-
-		const newHeight = Math.max(this.inputField.scrollHeight, minHeight);
-		this.inputField.style.height = newHeight + 'px';
-
-		const maxHeight = window.innerHeight * 0.5;
-		if (newHeight > maxHeight) {
-			this.inputField.style.height = maxHeight + 'px';
-		}
-	}
-
-	addMessage(message: ChatMessage) {
-		this.messages.push(message);
-		this.renderMessage(message);
-	}
-
-	renderMessage(chatMessage: ChatMessage) {
-		try {
-			let cssClass = 'ai-chat-message';
-			if (chatMessage.isUserInput) {
-				cssClass += ' ai-chat-message-user';
-			} else if (chatMessage.type === 'result') {
-				cssClass += ' ai-chat-message-final-response';
-			} else {
-				cssClass += ' ai-chat-message-assistant';
-			}
-
-			const messageEl = this.messagesContainer.createEl('div', { cls: cssClass });
-
-			if (chatMessage.type === 'user' && !chatMessage.isUserInput) {
-				this.renderThinkingMessage(messageEl, chatMessage);
-			} else if (chatMessage.type === 'assistant') {
-				this.renderAssistantThought(messageEl, chatMessage);
-			} else if (chatMessage.type === 'result') {
-				this.renderFinalResponse(messageEl, chatMessage);
-			} else {
-				const contentEl = messageEl.createEl('div', { cls: 'ai-message-content' });
-				this.renderMessageContent(contentEl, chatMessage);
-			}
-
-			if (chatMessage.timestamp && (chatMessage.isUserInput || chatMessage.type === 'result')) {
-				const timestampEl = messageEl.createEl('div', { cls: 'ai-message-timestamp' });
-				timestampEl.setText(chatMessage.timestamp.toLocaleTimeString());
-			}
-
-			requestAnimationFrame(() => {
-				this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
-			});
-		} catch (error) {
-			console.error('Error rendering message:', error, chatMessage);
-		}
-	}
-
-	getDisplayName(type: string, isUserInput = false): string {
-		switch (type) {
-			case 'user': return isUserInput ? 'You' : 'Claude';
-			case 'assistant': return 'Claude';
-			case 'system': return 'System';
-			case 'result': return 'Claude';
-			default: return type;
-		}
-	}
-
-	renderMessageContent(container: HTMLElement, chatMessage: ChatMessage) {
-		try {
-			if (chatMessage.message?.content) {
-				chatMessage.message.content.forEach((content: ContentBlock) => {
-					if (content.type === 'text') {
-						const textEl = container.createEl('div', { cls: 'ai-message-text' });
-						textEl.innerHTML = this.formatText((content as TextBlock).text);
-					} else if (content.type === 'tool_use') {
-						const toolContent = content as ToolUseBlock;
-						if (toolContent.name === 'TodoWrite') {
-							this.renderTodoCard(container, toolContent);
-						} else {
-							this.renderCollapsibleTool(container, toolContent);
-						}
-					} else if (content.type === 'tool_result') {
-						const resultEl = container.createEl('div', { cls: 'ai-tool-result' });
-						const pre = resultEl.createEl('pre');
-						const resultContent = (content as ToolResultBlock).content;
-						const resultText = resultContent || 'No content';
-						pre.createEl('code', { text: typeof resultText === 'string' ? resultText : JSON.stringify(resultText, null, 2) });
-					}
-				});
-			} else if (chatMessage.result) {
-				const resultEl = container.createEl('div', { cls: 'ai-final-result' });
-				resultEl.innerHTML = this.formatText(chatMessage.result);
-			} else if (chatMessage.subtype === 'init') {
-				container.createEl('div', {
-					text: 'Cooking...',
-					cls: 'ai-system-init'
-				});
-			} else if (chatMessage.subtype) {
-				container.createEl('div', { text: `System: ${chatMessage.subtype}` });
-			}
-		} catch (error) {
-			console.warn('Error rendering message content:', error, chatMessage);
-			container.createEl('div', {
-				text: 'Error rendering message content',
-				cls: 'ai-error-message'
-			});
-		}
-	}
-
-	renderTodoCard(container: HTMLElement, content: ToolUseBlock) {
-		const cardEl = container.createEl('div', { cls: 'ai-todo-card' });
-		const headerEl = cardEl.createEl('div', { cls: 'ai-todo-header' });
-		headerEl.createEl('span', { text: 'Tasks', cls: 'ai-todo-title' });
-
-		const input = content.input as { todos?: Array<{ status: string; content: string }> };
-		if (input?.todos) {
-			const todosEl = cardEl.createEl('div', { cls: 'ai-todos-list' });
-			input.todos.forEach((todo) => {
-				const todoEl = todosEl.createEl('div', { cls: 'ai-todo-item' });
-
-				const iconEl = todoEl.createEl('span', { cls: 'ai-todo-status' });
-				if (todo.status === 'completed') {
-					setIcon(iconEl, 'circle-check');
-				} else if (todo.status === 'in_progress') {
-					setIcon(iconEl, 'circle-ellipsis');
-				} else {
-					setIcon(iconEl, 'circle');
-				}
-
-				todoEl.createEl('span', { text: todo.content, cls: 'ai-todo-content' });
-			});
-		}
-	}
-
-	renderCollapsibleTool(container: HTMLElement, content: ToolUseBlock) {
-		const toolEl = container.createEl('div', { cls: 'ai-tool-collapsible' });
-		const headerEl = toolEl.createEl('div', { cls: 'ai-tool-header clickable' });
-
-		headerEl.createEl('span', { text: `Using tool: ${content.name || 'Unknown'}`, cls: 'ai-tool-name' });
-
-		const contentEl = toolEl.createEl('div', { cls: 'ai-tool-content collapsed' });
-		if (content.input) {
-			const pre = contentEl.createEl('pre');
-			pre.createEl('code', { text: JSON.stringify(content.input, null, 2) });
-		}
-
-		headerEl.addEventListener('click', () => {
-			if (contentEl.hasClass('collapsed')) {
-				contentEl.removeClass('collapsed');
-			} else {
-				contentEl.addClass('collapsed');
-			}
-		});
-	}
-
-	renderThinkingMessage(messageEl: HTMLElement, chatMessage: ChatMessage) {
-		const hasToolResults = chatMessage.message?.content?.some(content => content.type === 'tool_result');
-		const headerText = hasToolResults ? 'Tool result' : 'Thinking...';
-
-		const headerEl = messageEl.createEl('div', { cls: 'ai-thinking-header clickable' });
-		headerEl.createEl('span', { text: headerText, cls: 'ai-thinking-label' });
-
-		const contentEl = messageEl.createEl('div', { cls: 'ai-thinking-content collapsed' });
-		this.renderMessageContent(contentEl, chatMessage);
-
-		headerEl.addEventListener('click', () => {
-			if (contentEl.hasClass('collapsed')) {
-				contentEl.removeClass('collapsed');
-			} else {
-				contentEl.addClass('collapsed');
-			}
-		});
-	}
-
-	renderAssistantThought(messageEl: HTMLElement, chatMessage: ChatMessage) {
-		const contentEl = messageEl.createEl('div', { cls: 'ai-message-content ai-self-thought' });
-		this.renderMessageContent(contentEl, chatMessage);
-	}
-
-	renderFinalResponse(messageEl: HTMLElement, chatMessage: ChatMessage) {
-		const contentEl = messageEl.createEl('div', { cls: 'ai-message-content ai-final-response' });
-		this.renderMessageContent(contentEl, chatMessage);
-	}
-
-	formatText(text: string): string {
-		return text
-			.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-			.replace(/\*(.*?)\*/g, '<em>$1</em>')
-			.replace(/`(.*?)`/g, '<code>$1</code>')
-			.replace(/\n/g, '<br>');
-	}
-
-	getCurrentFilePath(): string | null {
-		const activeFile = this.app.workspace.getActiveFile();
-		if (activeFile) {
-			const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
-			return `${vaultPath}/${activeFile.path}`;
-		}
-		return null;
-	}
-
-	updateFileContextDisplay(textElement: HTMLElement) {
-		textElement.setText('Current page');
-	}
-
-	handleButtonClick() {
-		if (this.isProcessing) {
-			this.cancelExecution();
-		} else {
-			this.handleSendMessage();
-		}
-	}
-
-	cancelExecution() {
-		this.agentService.cancel();
-		this.setProcessingState(false);
-
-		const cancelMessage: ChatMessage = {
-			type: 'system',
-			result: 'Message execution cancelled',
-			session_id: this.currentSessionId || `session-${Date.now()}`,
-			uuid: `cancel-${Date.now()}`,
-			timestamp: new Date()
-		};
-		this.addMessage(cancelMessage);
-	}
-
-	setProcessingState(processing: boolean) {
+	private setProcessingState(processing: boolean): void {
 		this.isProcessing = processing;
 
 		if (processing) {
@@ -393,54 +202,66 @@ export class AIChatView extends ItemView {
 		}
 	}
 
-	async handleSendMessage() {
-		const messageText = this.inputField.value.trim();
-		if (messageText && !this.isProcessing) {
-			let finalMessage = messageText;
-			if (this.includeFileContext) {
-				const currentFile = this.getCurrentFilePath();
-				if (currentFile) {
-					finalMessage = `Current file context: ${currentFile}\n\n${messageText}`;
-				}
-			}
+	// ==================== 메시지 처리 ====================
 
-			if (this.settings.debugContext) {
-				console.log('=== DEBUG CONTEXT START ===');
-				console.log('API Key configured:', !!this.settings.apiKey);
-				console.log('Model:', this.settings.model);
-				console.log('New message context:', {
-					originalMessage: messageText,
-					finalMessage: finalMessage,
-					includeFileContext: this.includeFileContext,
-					currentFile: this.includeFileContext ? this.getCurrentFilePath() : null,
-					sessionId: this.currentSessionId
-				});
-				console.log('=== DEBUG CONTEXT END ===');
-			}
+	private addMessage(message: ChatMessage): void {
+		this.messages.push(message);
+		this.renderer.renderMessage(message);
+	}
 
-			const userMessage: ChatMessage = {
-				type: 'user',
-				message: {
-					id: `msg-${Date.now()}`,
-					role: 'user',
-					content: [{ type: 'text', text: messageText }]
-				},
-				session_id: `session-${Date.now()}`,
-				uuid: `user-${Date.now()}`,
-				timestamp: new Date(),
-				isUserInput: true
-			};
-
-			this.addMessage(userMessage);
-			this.inputField.value = '';
-			this.autoResizeTextarea();
-			this.setProcessingState(true);
-			await this.executeCommand(finalMessage);
-			this.setProcessingState(false);
+	private handleButtonClick(): void {
+		if (this.isProcessing) {
+			this.cancelExecution();
+		} else {
+			this.handleSendMessage();
 		}
 	}
 
-	async executeCommand(prompt: string) {
+	private async handleSendMessage(): Promise<void> {
+		const messageText = this.inputField.value.trim();
+		if (!messageText || this.isProcessing) return;
+
+		const finalMessage = this.buildFinalMessage(messageText);
+		this.logDebugContext(messageText, finalMessage);
+
+		const userMessage = MessageFactory.createUserInputMessage(messageText, this.currentSessionId);
+		this.addMessage(userMessage);
+
+		this.inputField.value = '';
+		this.autoResizeTextarea();
+		this.setProcessingState(true);
+
+		await this.executeCommand(finalMessage);
+		this.setProcessingState(false);
+	}
+
+	private buildFinalMessage(messageText: string): string {
+		if (this.includeFileContext) {
+			const currentFile = this.getCurrentFilePath();
+			if (currentFile) {
+				return `Current file context: ${currentFile}\n\n${messageText}`;
+			}
+		}
+		return messageText;
+	}
+
+	private logDebugContext(originalMessage: string, finalMessage: string): void {
+		if (!this.settings.debugContext) return;
+
+		console.log('=== DEBUG CONTEXT START ===');
+		console.log('API Key configured:', !!this.settings.apiKey);
+		console.log('Model:', this.settings.model);
+		console.log('New message context:', {
+			originalMessage,
+			finalMessage,
+			includeFileContext: this.includeFileContext,
+			currentFile: this.includeFileContext ? this.getCurrentFilePath() : null,
+			sessionId: this.currentSessionId
+		});
+		console.log('=== DEBUG CONTEXT END ===');
+	}
+
+	private async executeCommand(prompt: string): Promise<void> {
 		const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath || process.cwd();
 
 		try {
@@ -449,7 +270,6 @@ export class AIChatView extends ItemView {
 				workingDirectory: vaultPath,
 				sessionId: this.currentSessionId,
 				onMessage: (message: ChatMessage) => {
-					// Update session ID from init message
 					if (message.type === 'system' && message.subtype === 'init' && message.session_id) {
 						this.currentSessionId = message.session_id;
 					}
@@ -462,13 +282,7 @@ export class AIChatView extends ItemView {
 					this.addMessage(message);
 				},
 				onError: (error: Error) => {
-					const errorMessage: ChatMessage = {
-						type: 'system',
-						result: `Error: ${error.message}`,
-						session_id: this.currentSessionId || `session-${Date.now()}`,
-						uuid: `error-${Date.now()}`,
-						timestamp: new Date()
-					};
+					const errorMessage = MessageFactory.createErrorMessage(error, this.currentSessionId);
 					this.addMessage(errorMessage);
 				},
 				onComplete: () => {
@@ -480,199 +294,75 @@ export class AIChatView extends ItemView {
 				this.currentSessionId = sessionId;
 			}
 		} catch (error) {
-			const errorMessage: ChatMessage = {
-				type: 'system',
-				result: `Failed to execute command: ${error instanceof Error ? error.message : String(error)}`,
-				session_id: this.currentSessionId || `session-${Date.now()}`,
-				uuid: `error-${Date.now()}`,
-				timestamp: new Date()
-			};
+			const errorMessage = MessageFactory.createErrorMessage(
+				error instanceof Error ? error : new Error(String(error)),
+				this.currentSessionId
+			);
 			this.addMessage(errorMessage);
 		}
 	}
 
-	startNewChat() {
+	private cancelExecution(): void {
+		this.agentService.cancel();
+		this.setProcessingState(false);
+
+		const cancelMessage = MessageFactory.createCancelMessage(this.currentSessionId);
+		this.addMessage(cancelMessage);
+	}
+
+	// ==================== 유틸리티 ====================
+
+	private autoResizeTextarea(): void {
+		this.inputField.style.height = 'auto';
+
+		const computedStyle = getComputedStyle(this.inputField);
+		const minHeight = parseFloat(computedStyle.minHeight);
+
+		const newHeight = Math.max(this.inputField.scrollHeight, minHeight);
+		this.inputField.style.height = newHeight + 'px';
+
+		const maxHeight = window.innerHeight * 0.5;
+		if (newHeight > maxHeight) {
+			this.inputField.style.height = maxHeight + 'px';
+		}
+	}
+
+	private getCurrentFilePath(): string | null {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (activeFile) {
+			const vaultPath = (this.app.vault.adapter as { basePath?: string }).basePath;
+			return `${vaultPath}/${activeFile.path}`;
+		}
+		return null;
+	}
+
+	private startNewChat(): void {
 		if (this.isProcessing) {
 			this.cancelExecution();
 		}
 
 		this.currentSessionId = null;
 		this.messages = [];
-		this.messagesContainer.empty();
+		this.renderer.clear();
 	}
 
-	addExampleMessages() {
-		const exampleSessionId = "4e639301-8fe0-4d70-a47e-db0b0605effa";
-
-		const userMessage: ChatMessage = {
-			type: 'user',
-			message: {
-				id: 'msg-user-001',
-				role: 'user',
-				content: [{ type: 'text', text: 'Could you make a plan for finding the date, execute the necessary steps, and then tell me the current datetime?' }]
-			},
-			session_id: exampleSessionId,
-			uuid: 'user-example-001',
-			timestamp: new Date(),
-			isUserInput: true
-		};
-		this.addMessage(userMessage);
-
-		const systemInitMessage: ChatMessage = {
-			type: 'system',
-			subtype: 'init',
-			session_id: exampleSessionId,
-			uuid: 'system-init-001',
-			timestamp: new Date()
-		};
-		this.addMessage(systemInitMessage);
-
-		const assistantTextMessage: ChatMessage = {
-			type: 'assistant',
-			message: {
-				id: 'msg_01QKejYVNzKEvJiLdgsjDnX8',
-				role: 'assistant',
-				content: [{ type: 'text', text: "I'll help you find the current datetime. Let me create a plan and execute it." }],
-				model: 'claude-sonnet-4-20250514',
-				usage: {
-					input_tokens: 4,
-					output_tokens: 7,
-					service_tier: 'standard'
-				}
-			},
-			session_id: exampleSessionId,
-			uuid: 'assistant-text-001',
-			timestamp: new Date()
-		};
-		this.addMessage(assistantTextMessage);
-
-		const todoToolMessage: ChatMessage = {
-			type: 'assistant',
-			message: {
-				id: 'msg_01TodoExample',
-				role: 'assistant',
-				content: [{
-					type: 'tool_use',
-					id: 'toolu_01XraaAU5TbdkpPhUq9Gepry',
-					name: 'TodoWrite',
-					input: {
-						todos: [
-							{content: 'Get current datetime using system command', status: 'pending', activeForm: 'Getting current datetime using system command'},
-							{content: 'Format and display the result', status: 'pending', activeForm: 'Formatting and displaying the result'}
-						]
-					}
-				}],
-				model: 'claude-sonnet-4-20250514'
-			},
-			session_id: exampleSessionId,
-			uuid: 'todo-tool-001',
-			timestamp: new Date()
-		};
-		this.addMessage(todoToolMessage);
-
-		const toolResultMessage: ChatMessage = {
-			type: 'user',
-			message: {
-				id: 'msg-tool-result-001',
-				role: 'user',
-				content: [{
-					tool_use_id: 'toolu_01XraaAU5TbdkpPhUq9Gepry',
-					type: 'tool_result',
-					content: 'Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable'
-				}]
-			},
-			session_id: exampleSessionId,
-			uuid: 'tool-result-001',
-			timestamp: new Date()
-		};
-		this.addMessage(toolResultMessage);
-
-		const bashToolMessage: ChatMessage = {
-			type: 'assistant',
-			message: {
-				id: 'msg_01BashExample',
-				role: 'assistant',
-				content: [{
-					type: 'tool_use',
-					id: 'toolu_0145mNNv4HW3V7LUTNwitdwd',
-					name: 'Bash',
-					input: {
-						command: 'date',
-						description: 'Get current date and time'
-					}
-				}],
-				model: 'claude-sonnet-4-20250514'
-			},
-			session_id: exampleSessionId,
-			uuid: 'bash-tool-001',
-			timestamp: new Date()
-		};
-		this.addMessage(bashToolMessage);
-
-		const bashResultMessage: ChatMessage = {
-			type: 'user',
-			message: {
-				id: 'msg-bash-result-001',
-				role: 'user',
-				content: [{
-					tool_use_id: 'toolu_0145mNNv4HW3V7LUTNwitdwd',
-					type: 'tool_result',
-					content: 'Wed 27 Aug 2025 09:54:15 EDT',
-					is_error: false
-				}]
-			},
-			session_id: exampleSessionId,
-			uuid: 'bash-result-001',
-			timestamp: new Date()
-		};
-		this.addMessage(bashResultMessage);
-
-		const todoUpdateMessage: ChatMessage = {
-			type: 'assistant',
-			message: {
-				id: 'msg_01TodoUpdate',
-				role: 'assistant',
-				content: [{
-					type: 'tool_use',
-					id: 'toolu_01TodoComplete',
-					name: 'TodoWrite',
-					input: {
-						todos: [
-							{content: 'Get current datetime using system command', status: 'completed', activeForm: 'Getting current datetime using system command'},
-							{content: 'Format and display the result', status: 'in_progress', activeForm: 'Formatting and displaying the result'}
-						]
-					}
-				}],
-				model: 'claude-sonnet-4-20250514'
-			},
-			session_id: exampleSessionId,
-			uuid: 'todo-update-001',
-			timestamp: new Date()
-		};
-		this.addMessage(todoUpdateMessage);
-
-		const finalResultMessage: ChatMessage = {
-			type: 'result',
-			result: 'The current datetime is: **Wednesday, August 27, 2025 at 9:54:15 AM EDT**',
-			session_id: exampleSessionId,
-			uuid: 'final-result-001',
-			timestamp: new Date()
-		};
-		this.addMessage(finalResultMessage);
+	private showExamples(): void {
+		this.startNewChat();
+		const exampleMessages = createExampleMessages();
+		exampleMessages.forEach(message => this.addMessage(message));
 	}
 
-	openSettings() {
-		(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.open();
-		(this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } }).setting.openTabById('obsidian-terminal-ai');
+	private openSettings(): void {
+		const app = this.app as unknown as {
+			setting: { open: () => void; openTabById: (id: string) => void }
+		};
+		app.setting.open();
+		app.setting.openTabById('obsidian-terminal-ai');
 	}
 
-	async onClose() {
-		if (this.isProcessing) {
-			this.agentService.cancel();
-		}
-	}
+	// ==================== 공개 메서드 ====================
 
-	updateSettings(settings: AIChatSettings) {
+	updateSettings(settings: AIChatSettings): void {
 		this.settings = settings;
 		this.agentService.updateSettings(settings);
 	}
