@@ -27,15 +27,16 @@ if you want to view the source, please visit the github repository of this plugi
 		var originalSetMaxListeners = events.setMaxListeners;
 		if (originalSetMaxListeners) {
 			events.setMaxListeners = function(n, ...eventTargets) {
-				var validTargets = eventTargets.filter(function(target) {
-					return target instanceof events.EventEmitter ||
-						(typeof EventTarget !== 'undefined' && target instanceof EventTarget);
-				});
-				if (validTargets.length > 0) {
-					return originalSetMaxListeners.call(events, n, ...validTargets);
+				try {
+					return originalSetMaxListeners.call(events, n, ...eventTargets);
+				} catch (err) {
+					// Silently ignore AbortSignal errors in older Node.js versions
+					if (err && err.code === 'ERR_INVALID_ARG_TYPE' &&
+						err.message && err.message.includes('AbortSignal')) {
+						return;
+					}
+					throw err;
 				}
-				// If no valid targets (e.g., AbortSignal in older Node), just ignore
-				return;
 			};
 		}
 	} catch (e) {
