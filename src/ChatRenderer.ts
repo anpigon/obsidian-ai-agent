@@ -141,6 +141,54 @@ export class ChatRenderer {
 	private renderTextBlock(container: HTMLElement, content: TextBlock): void {
 		const textEl = container.createEl('div', { cls: 'ai-message-text' });
 		textEl.innerHTML = this.formatText(content.text);
+
+		// Phase 2-G: 복사 버튼 이벤트 리스너 추가
+		this.attachCopyButtonListeners(textEl);
+	}
+
+	/**
+	 * Phase 2-G: 복사 버튼 이벤트 리스너 부착
+	 */
+	private attachCopyButtonListeners(container: HTMLElement): void {
+		const copyButtons = container.querySelectorAll('.ai-copy-button');
+		copyButtons.forEach(button => {
+			button.addEventListener('click', async (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+
+				const target = e.target as HTMLElement;
+				const code = target.getAttribute('data-code');
+
+				if (code) {
+					try {
+						// HTML 엔티티 디코딩
+						const decodedCode = this.decodeHtmlEntities(code);
+						await navigator.clipboard.writeText(decodedCode);
+
+						// 버튼 텍스트 변경
+						const originalText = target.textContent;
+						target.textContent = 'Copied!';
+						target.classList.add('copied');
+
+						setTimeout(() => {
+							target.textContent = originalText;
+							target.classList.remove('copied');
+						}, 2000);
+					} catch (error) {
+						console.error('Failed to copy:', error);
+					}
+				}
+			});
+		});
+	}
+
+	/**
+	 * HTML 엔티티 디코딩
+	 */
+	private decodeHtmlEntities(text: string): string {
+		const textarea = document.createElement('textarea');
+		textarea.innerHTML = text;
+		return textarea.value;
 	}
 
 	/**
@@ -297,11 +345,52 @@ export class ChatRenderer {
 	 * 텍스트 마크다운 포맷팅
 	 */
 	formatText(text: string): string {
-		return text
+		// Phase 2-G: 코드 블록을 복사 버튼이 있는 형태로 변환
+		let formatted = text;
+
+		// 멀티라인 코드 블록 처리 (```language ... ```)
+		formatted = formatted.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+			const codeId = `code-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+			const escapedCode = this.escapeHtml(code.trim());
+			const languageLabel = lang || 'code';
+			return `<div class="ai-code-block" data-code-id="${codeId}">
+				<div class="ai-code-header">
+					<span class="ai-code-language">${languageLabel}</span>
+					<button class="ai-copy-button" data-code="${this.escapeForAttribute(code.trim())}">Copy</button>
+				</div>
+				<pre><code class="language-${lang}">${escapedCode}</code></pre>
+			</div>`;
+		});
+
+		// 인라인 포맷팅
+		formatted = formatted
 			.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
 			.replace(/\*(.*?)\*/g, '<em>$1</em>')
-			.replace(/`(.*?)`/g, '<code>$1</code>')
+			.replace(/`([^`]+)`/g, '<code class="ai-inline-code">$1</code>')
 			.replace(/\n/g, '<br>');
+
+		return formatted;
+	}
+
+	/**
+	 * HTML 이스케이프
+	 */
+	private escapeHtml(text: string): string {
+		const div = document.createElement('div');
+		div.textContent = text;
+		return div.innerHTML;
+	}
+
+	/**
+	 * 속성값용 이스케이프
+	 */
+	private escapeForAttribute(text: string): string {
+		return text
+			.replace(/&/g, '&amp;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;');
 	}
 
 	/**
