@@ -18,28 +18,34 @@ This file provides guidance for AI assistants working with the obsidian-ai-agent
 
 ```
 obsidian-ai-agent/
-├── main.ts              # Plugin entry point, lifecycle management
-├── AgentService.ts      # Claude Agent SDK integration layer
-├── ChatView.ts          # UI component for the chat interface
-├── SettingsTab.ts       # Plugin settings configuration UI
-├── types.ts             # TypeScript type definitions
-├── styles.css           # Chat interface styling
-├── esbuild.config.mjs   # Build configuration
-├── manifest.json        # Obsidian plugin manifest
-├── package.json         # Dependencies and scripts
-├── tsconfig.json        # TypeScript configuration
-└── .eslintrc            # ESLint configuration
+├── src/                     # Source code directory
+│   ├── main.ts              # Plugin entry point, lifecycle management
+│   ├── AgentService.ts      # Claude Agent SDK integration layer
+│   ├── ChatView.ts          # UI component for the chat interface
+│   ├── ChatRenderer.ts      # Chat message rendering utilities
+│   ├── MessageFactory.ts    # Message creation utilities
+│   ├── SettingsTab.ts       # Plugin settings configuration UI
+│   ├── types.ts             # TypeScript type definitions
+│   └── exampleMessages.ts   # Example message data for testing
+├── styles.css               # Chat interface styling
+├── esbuild.config.mjs       # Build configuration
+├── manifest.json            # Obsidian plugin manifest
+├── package.json             # Dependencies and scripts
+├── tsconfig.json            # TypeScript configuration
+└── .eslintrc                # ESLint configuration
 ```
 
 ### Core Files
 
 | File | Purpose |
 |------|---------|
-| `main.ts` | Plugin class extending Obsidian's `Plugin`. Handles loading/unloading, settings, and view registration. |
-| `AgentService.ts` | Wraps the Claude Agent SDK `query()` function. Manages streaming responses, session IDs, and abort handling. |
-| `ChatView.ts` | Extends Obsidian's `ItemView`. Renders the chat UI, handles user input, displays messages, and manages chat state. |
-| `SettingsTab.ts` | Plugin settings tab for API key, model selection, and debug mode. |
-| `types.ts` | Type definitions for settings, messages, content blocks, and SDK message types. |
+| `src/main.ts` | Plugin class extending Obsidian's `Plugin`. Handles loading/unloading, settings, and view registration. |
+| `src/AgentService.ts` | Wraps the Claude Agent SDK `query()` function. Manages streaming responses, session IDs, and abort handling. |
+| `src/ChatView.ts` | Extends Obsidian's `ItemView`. Renders the chat UI, handles user input, displays messages, and manages chat state. |
+| `src/ChatRenderer.ts` | Utility class for rendering chat messages and content blocks. |
+| `src/MessageFactory.ts` | Factory for creating structured chat messages. |
+| `src/SettingsTab.ts` | Plugin settings tab for API key, model selection, and debug mode. |
+| `src/types.ts` | Type definitions for settings, messages, content blocks, and SDK message types. |
 
 ## Architecture
 
@@ -54,19 +60,19 @@ User Input → ChatView.handleSendMessage()
 
 ### Key Classes
 
-**AIChatPlugin** (`main.ts`)
+**AIChatPlugin** (`src/main.ts`)
 - Entry point extending `Plugin`
 - Registers the custom view type `ai-chat-view`
 - Manages settings persistence
 - Activates the chat view in the right sidebar
 
-**AgentService** (`AgentService.ts`)
+**AgentService** (`src/AgentService.ts`)
 - Manages Claude Agent SDK interactions
 - Handles streaming message conversion
 - Provides cancellation support via `AbortController`
 - Converts SDK messages to internal `ChatMessage` format
 
-**AIChatView** (`ChatView.ts`)
+**AIChatView** (`src/ChatView.ts`)
 - Obsidian `ItemView` implementation
 - Manages chat UI lifecycle
 - Handles message rendering (user, assistant, tool use, tool results)
@@ -117,7 +123,7 @@ Runs TypeScript type checking and creates a minified bundle.
 - Use explicit type annotations for function parameters and return types
 - Prefer interfaces over types for object shapes
 - Use `readonly` for immutable properties where applicable
-- Follow the existing patterns in `types.ts` for new type definitions
+- Follow the existing patterns in `src/types.ts` for new type definitions
 
 ### Naming Conventions
 - **Classes**: PascalCase (e.g., `AIChatView`, `AgentService`)
@@ -157,7 +163,7 @@ Runs TypeScript type checking and creates a minified bundle.
 
 ## Configuration
 
-### Settings (`types.ts`)
+### Settings (`src/types.ts`)
 ```typescript
 interface AIChatSettings {
   apiKey?: string;        // Anthropic API key
@@ -166,7 +172,7 @@ interface AIChatSettings {
 }
 ```
 
-### Available Models (`types.ts`)
+### Available Models (`src/types.ts`)
 - `claude-opus-4-5-20251101` - Most capable
 - `claude-sonnet-4-20250514` - Balanced (default)
 - `claude-sonnet-4-5-20250929` - Latest
@@ -175,19 +181,19 @@ interface AIChatSettings {
 ## Common Tasks
 
 ### Adding a New Setting
-1. Add the property to `AIChatSettings` interface in `types.ts`
-2. Add default value to `DEFAULT_SETTINGS` in `types.ts`
-3. Add UI control in `SettingsTab.ts` `display()` method
+1. Add the property to `AIChatSettings` interface in `src/types.ts`
+2. Add default value to `DEFAULT_SETTINGS` in `src/types.ts`
+3. Add UI control in `src/SettingsTab.ts` `display()` method
 4. Update relevant components to use the new setting
 
 ### Adding a New Message Type
-1. Define the type in `types.ts` (update `ChatMessage` or create new interface)
-2. Handle the new type in `AgentService.convertSDKMessage()`
-3. Add rendering logic in `ChatView.renderMessage()` or `renderMessageContent()`
+1. Define the type in `src/types.ts` (update `ChatMessage` or create new interface)
+2. Handle the new type in `src/AgentService.convertSDKMessage()`
+3. Add rendering logic in `src/ChatView.renderMessage()` or `renderMessageContent()`
 4. Add corresponding CSS styles in `styles.css`
 
 ### Modifying the Chat UI
-- UI components are in `ChatView.ts`
+- UI components are in `src/ChatView.ts`
 - Styles are in `styles.css`
 - Use Obsidian's `createEl()` for DOM creation
 - Follow existing patterns for collapsible sections
